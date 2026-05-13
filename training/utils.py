@@ -1,4 +1,6 @@
 # utilities for PPO training and evaluation
+import dataclasses
+
 import jax
 import jax.numpy as jnp
 from flax import struct
@@ -107,9 +109,9 @@ def ppo_update_networks(
 # for evaluation (evaluate for N consecutive episodes, sum rewards)
 # N=1 single task, N>1 for meta-RL
 class RolloutStats(struct.PyTreeNode):
-    reward: jax.Array = jnp.asarray(0.0)
-    length: jax.Array = jnp.asarray(0)
-    episodes: jax.Array = jnp.asarray(0)
+    reward: jax.Array = dataclasses.field(default_factory=lambda: jnp.asarray(0.0))
+    length: jax.Array = dataclasses.field(default_factory=lambda: jnp.asarray(0))
+    episodes: jax.Array = dataclasses.field(default_factory=lambda: jnp.asarray(0))
 
 
 def rollout(

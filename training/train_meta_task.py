@@ -1,6 +1,8 @@
 # Adapted from PureJaxRL implementation and minigrid baselines, source:
 # https://github.com/lupuandr/explainable-policies/blob/50acbd777dc7c6d6b8b7255cd1249e81715bcb54/purejaxrl/ppo_rnn.py#L4
 # https://github.com/lcswillems/rl-starter-files/blob/master/model.py
+import datetime
+import json
 import os
 import shutil
 import time
@@ -14,7 +16,6 @@ import jax.tree_util as jtu
 import optax
 import orbax
 import pyrallis
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
@@ -64,6 +65,9 @@ class TrainConfig:
     eval_seed: int = 42
     train_seed: int = 42
     checkpoint_path: Optional[str] = None
+    # logging / outputs
+    run_dir: str = "./runs"
+    log_every_n_updates: int = 10
 
     def __post_init__(self):
         num_devices = jax.local_device_count()
@@ -154,7 +158,7 @@ def make_train(
         eval_hstate = init_hstate[0][None]
 
         # META TRAIN LOOP
-        def _meta_step(meta_state, _):
+        def _meta_step(meta_state, update_idx):
             rng, train_state = meta_state
 
             # INIT ENV
@@ -312,29 +316,92 @@ def make_train(
                     "lr": train_state.opt_state[-1].hyperparams["learning_rate"],
                 }
             )
+
+            # periodic in-training log (device 0 only, every N updates + last update)
+            device_id = jax.lax.axis_index("devices")
+            should_log = (
+                ((update_idx % config.log_every_n_updates) == 0)
+                | (update_idx == (config.num_meta_updates - 1))
+            ) & (device_id == 0)
+
+            def _do_log(_):
+                jax.debug.print(
+                    "[update {i}/{n}] returns_mean={rm:.3f} returns_median={rmd:.3f} "
+                    "lengths={ln:.1f} total_loss={tl:.4f} value_loss={vl:.4f} "
+                    "actor_loss={al:.4f} entropy={en:.3f} lr={lr:.6f}",
+                    i=update_idx + 1,
+                    n=config.num_meta_updates,
+                    rm=loss_info["eval/returns_mean"],
+                    rmd=loss_info["eval/returns_median"],
+                    ln=loss_info["eval/lengths"],
+                    tl=loss_info["total_loss"],
+                    vl=loss_info["value_loss"],
+                    al=loss_info["actor_loss"],
+                    en=loss_info["entropy"],
+                    lr=loss_info["lr"],
+                )
+                return 0
+
+            jax.lax.cond(should_log, _do_log, lambda _: 0, operand=None)
+
             meta_state = (rng, train_state)
             return meta_state, loss_info
 
         meta_state = (rng, train_state)
-        meta_state, loss_info = jax.lax.scan(_meta_step, meta_state, None, config.num_meta_updates)
+        meta_state, loss_info = jax.lax.scan(
+            _meta_step, meta_state, jnp.arange(config.num_meta_updates)
+        )
         return {"state": meta_state[-1], "loss_info": loss_info}
 
     return train
 
 
+def _save_plot(loss_info, num_updates: int, out_path: str) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print(f"matplotlib not available, skipping plot ({out_path})")
+        return
+
+    keys = sorted(loss_info.keys())
+    n = len(keys)
+    cols = 3
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.5, rows * 3.2), squeeze=False)
+    axes = axes.flatten()
+    x = list(range(num_updates))
+    for ax, key in zip(axes, keys):
+        y = [float(loss_info[key][i]) for i in range(num_updates)]
+        ax.plot(x, y)
+        ax.set_title(key)
+        ax.set_xlabel("meta update")
+        ax.grid(True, alpha=0.3)
+    for ax in axes[n:]:
+        ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+
+
 @pyrallis.wrap()
 def train(config: TrainConfig):
-    # logging to wandb
-    run = wandb.init(
-        project=config.project,
-        group=config.group,
-        name=config.name,
-        config=asdict(config),
-        save_code=True,
-    )
-    # removing existing checkpoints if any
-    if config.checkpoint_path is not None and os.path.exists(config.checkpoint_path):
-        shutil.rmtree(config.checkpoint_path)
+    # set up run directory under <run_dir>/<name>-<timestamp>/
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_path = os.path.join(config.run_dir, f"{config.name}-{timestamp}")
+    os.makedirs(run_path, exist_ok=True)
+    print(f"Run dir: {run_path}")
+
+    # default checkpoint path inside the run dir (always on)
+    checkpoint_path = config.checkpoint_path or os.path.join(run_path, "checkpoint")
+    if os.path.exists(checkpoint_path):
+        shutil.rmtree(checkpoint_path)
+
+    # persist config up-front so we have it even if training crashes
+    with open(os.path.join(run_path, "config.json"), "w") as f:
+        json.dump(asdict(config), f, indent=2)
 
     rng, env, env_params, benchmark, init_hstate, train_state = make_states(config)
     # replicating args across devices
@@ -345,37 +412,58 @@ def train(config: TrainConfig):
     print("Compiling...")
     t = time.time()
     train_fn = make_train(env, env_params, benchmark, config)
-    train_fn = train_fn.lower(rng, train_state, init_hstate).compile()
-    elapsed_time = time.time() - t
-    print(f"Done in {elapsed_time:.2f}s.")
+    compile_time = time.time() - t
+    print(f"Done in {compile_time:.2f}s.")
 
     print("Training...")
     t = time.time()
     train_info = jax.block_until_ready(train_fn(rng, train_state, init_hstate))
-    elapsed_time = time.time() - t
-    print(f"Done in {elapsed_time:.2f}s.")
+    train_time = time.time() - t
+    total_env_steps = config.total_timesteps_per_device * jax.local_device_count()
+    fps = total_env_steps / train_time
+    print(f"Done in {train_time:.2f}s. ({fps:,.0f} env steps/sec)")
 
-    print("Logginig...")
+    print("Dumping metrics...")
     loss_info = unreplicate(train_info["loss_info"])
+    # eagerly pull arrays out of device memory once
+    loss_info = jtu.tree_map(lambda x: jax.device_get(x).tolist(), loss_info)
 
-    total_transitions = 0
-    for i in range(config.num_meta_updates):
-        total_transitions += config.num_steps_per_env * config.num_envs_per_device * jax.local_device_count()
-        info = jtu.tree_map(lambda x: x[i].item(), loss_info)
-        info["transitions"] = total_transitions
-        wandb.log(info)
+    metrics_path = os.path.join(run_path, "metrics.jsonl")
+    transitions_per_update = config.num_steps_per_env * config.num_envs_per_device * jax.local_device_count()
+    with open(metrics_path, "w") as f:
+        for i in range(config.num_meta_updates):
+            info = {k: float(v[i]) for k, v in loss_info.items()}
+            info["update"] = i
+            info["transitions"] = transitions_per_update * (i + 1)
+            f.write(json.dumps(info) + "\n")
 
-    run.summary["training_time"] = elapsed_time
-    run.summary["steps_per_second"] = (config.total_timesteps_per_device * jax.local_device_count()) / elapsed_time
+    summary = {
+        "compile_time_seconds": compile_time,
+        "training_time_seconds": train_time,
+        "env_steps_per_second": fps,
+        "total_env_steps": total_env_steps,
+        "num_meta_updates": config.num_meta_updates,
+        "num_devices": jax.local_device_count(),
+        "final_returns_mean": float(loss_info["eval/returns_mean"][-1]),
+        "final_returns_median": float(loss_info["eval/returns_median"][-1]),
+        "final_lengths": float(loss_info["eval/lengths"][-1]),
+    }
+    with open(os.path.join(run_path, "summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
 
-    if config.checkpoint_path is not None:
-        checkpoint = {"config": asdict(config), "params": unreplicate(train_info)["state"].params}
-        orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-        save_args = orbax_utils.save_args_from_target(checkpoint)
-        orbax_checkpointer.save(config.checkpoint_path, checkpoint, save_args=save_args)
+    print("Saving checkpoint...")
+    checkpoint = {"config": asdict(config), "params": unreplicate(train_info)["state"].params}
+    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    save_args = orbax_utils.save_args_from_target(checkpoint)
+    orbax_checkpointer.save(checkpoint_path, checkpoint, save_args=save_args)
 
-    print("Final return: ", float(loss_info["eval/returns_mean"][-1]))
-    run.finish()
+    print("Plotting...")
+    _save_plot(loss_info, config.num_meta_updates, os.path.join(run_path, "metrics.png"))
+
+    print(f"Run dir:    {run_path}")
+    print(f"Checkpoint: {checkpoint_path}")
+    print(f"Metrics:    {metrics_path}")
+    print(f"Summary:    {json.dumps(summary, indent=2)}")
 
 
 if __name__ == "__main__":

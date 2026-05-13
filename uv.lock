@@ -553,6 +553,15 @@ wheels = [
 ]
 
 [[package]]
+name = "dataclasses"
+version = "0.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/12/7919c5d8b9c497f9180db15ea8ead6499812ea8264a6ae18766d93c59fe5/dataclasses-0.8.tar.gz", hash = "sha256:8479067f342acf957dc82ec415d355ab5edb7e7646b90dc6e2fd1d96ad084c97", size = 36581, upload-time = "2020-11-13T14:40:30.139Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/ca/75fac5856ab5cfa51bbbcefa250182e50441074fdc3f803f6e76451fab43/dataclasses-0.8-py3-none-any.whl", hash = "sha256:0201d89fa866f68c8ebd9d08ee6ff50c0b255f8ec63a71c16fda7af82bb887bf", size = 19041, upload-time = "2020-11-13T14:40:29.194Z" },
+]
+
+[[package]]
 name = "decorator"
 version = "5.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3631,6 +3640,9 @@ source = { editable = "." }
 dependencies = [
     { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "dataclasses" },
+    { name = "distrax", version = "0.1.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "distrax", version = "0.1.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "flax", version = "0.8.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "flax", version = "0.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -3642,8 +3654,10 @@ dependencies = [
     { name = "jaxlib", version = "0.4.30", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "jaxlib", version = "0.8.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pyrallis" },
     { name = "rich" },
     { name = "tqdm" },
+    { name = "wandb" },
 ]
 
 [package.optional-dependencies]
@@ -3669,6 +3683,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "chex", specifier = ">=0.1.85" },
+    { name = "dataclasses", specifier = ">=0.8" },
+    { name = "distrax", specifier = ">=0.1.5" },
     { name = "distrax", marker = "extra == 'baselines'", specifier = ">=0.1.4" },
     { name = "flax", specifier = ">=0.8.0" },
     { name = "imageio", specifier = ">=2.31.2" },
@@ -3679,12 +3695,14 @@ requires-dist = [
     { name = "optax", marker = "extra == 'baselines'", specifier = ">=0.1.5" },
     { name = "orbax", marker = "extra == 'baselines'", specifier = ">=0.1.9" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.3.3" },
+    { name = "pyrallis", specifier = ">=0.3.1" },
     { name = "pyrallis", marker = "extra == 'baselines'", specifier = ">=0.3.1" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.347" },
     { name = "rich", specifier = ">=13.4.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.6" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "tqdm", marker = "extra == 'baselines'", specifier = ">=4.66.4" },
+    { name = "wandb", specifier = ">=0.23.1" },
     { name = "wandb", marker = "extra == 'baselines'", specifier = ">=0.15.10" },
 ]
 provides-extras = ["dev", "baselines"]
