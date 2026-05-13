@@ -36,8 +36,8 @@ class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
     name: str = "meta-task-ppo"
-    env_id: str = "XLand-MiniGrid-R1-9x9"
-    benchmark_id: str = "trivial-21k"
+    env_id: str = "XLand-MiniGrid-R4-13x13"
+    benchmark_id: str = "small-1m"
     img_obs: bool = False
     # agent
     obs_emb_dim: int = 16
@@ -45,14 +45,14 @@ class TrainConfig:
     rnn_hidden_dim: int = 1024
     rnn_num_layers: int = 1
     head_hidden_dim: int = 256
-    # training
+    # training (paper Table 6)
     enable_bf16: bool = False
-    num_envs: int = 8192
-    num_steps_per_env: int = 4096
-    num_steps_per_update: int = 32
+    num_envs: int = 16384
+    num_steps_per_env: int = 12800
+    num_steps_per_update: int = 256
     update_epochs: int = 1
-    num_minibatches: int = 16
-    total_timesteps: int = 100_000_000
+    num_minibatches: int = 32
+    total_timesteps: int = 10_000_000_000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -60,8 +60,8 @@ class TrainConfig:
     ent_coef: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
-    eval_num_envs: int = 512
-    eval_num_episodes: int = 10
+    eval_num_envs: int = 4096
+    eval_num_episodes: int = 25
     eval_seed: int = 42
     train_seed: int = 42
     checkpoint_path: Optional[str] = None
