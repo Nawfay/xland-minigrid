@@ -47,7 +47,7 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training (paper Table 6)
     enable_bf16: bool = False
-    num_envs: int = 16384
+    num_envs: int = 20480
     num_steps_per_env: int = 12800
     num_steps_per_update: int = 256
     update_epochs: int = 1
