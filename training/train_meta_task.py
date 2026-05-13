@@ -16,6 +16,7 @@ import jax.tree_util as jtu
 import optax
 import orbax
 import pyrallis
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
@@ -68,6 +69,8 @@ class TrainConfig:
     # logging / outputs
     run_dir: str = "./runs"
     log_every_n_updates: int = 10
+    use_wandb: bool = True
+    wandb_mode: str = "online"  # "online" | "offline" | "disabled"
 
     def __post_init__(self):
         num_devices = jax.local_device_count()
@@ -405,6 +408,18 @@ def train(config: TrainConfig):
     with open(os.path.join(run_path, "config.json"), "w") as f:
         json.dump(asdict(config), f, indent=2)
 
+    # wandb init (after run_path so dir matches the local run)
+    wandb_run = None
+    if config.use_wandb:
+        wandb_run = wandb.init(
+            project=config.project,
+            group=config.group,
+            name=f"{config.name}-{timestamp}",
+            config=asdict(config),
+            dir=run_path,
+            mode=config.wandb_mode,
+        )
+
     rng, env, env_params, benchmark, init_hstate, train_state = make_states(config)
     # replicating args across devices
     rng = jax.random.split(rng, num=jax.local_device_count())
@@ -438,6 +453,8 @@ def train(config: TrainConfig):
             info["update"] = i
             info["transitions"] = transitions_per_update * (i + 1)
             f.write(json.dumps(info) + "\n")
+            if wandb_run is not None:
+                wandb.log(info, step=info["transitions"])
 
     summary = {
         "compile_time_seconds": compile_time,
@@ -452,6 +469,8 @@ def train(config: TrainConfig):
     }
     with open(os.path.join(run_path, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
+    if wandb_run is not None:
+        wandb_run.summary.update(summary)
 
     print("Saving checkpoint...")
     checkpoint = {"config": asdict(config), "params": unreplicate(train_info)["state"].params}
@@ -473,6 +492,13 @@ def train(config: TrainConfig):
     print(f"Checkpoint: {checkpoint_path}")
     print(f"Metrics:    {metrics_path}")
     print(f"Summary:    {json.dumps(summary, indent=2)}")
+
+    if wandb_run is not None:
+        # upload the plot too if it got rendered
+        plot_path = os.path.join(run_path, "metrics.png")
+        if os.path.exists(plot_path):
+            wandb_run.log({"metrics_plot": wandb.Image(plot_path)})
+        wandb_run.finish()
 
 
 if __name__ == "__main__":
