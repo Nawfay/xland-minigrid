@@ -394,8 +394,10 @@ def train(config: TrainConfig):
     os.makedirs(run_path, exist_ok=True)
     print(f"Run dir: {run_path}")
 
-    # default checkpoint path inside the run dir (always on)
-    checkpoint_path = config.checkpoint_path or os.path.join(run_path, "checkpoint")
+    # default checkpoint path inside the run dir (always on).
+    # orbax requires an absolute path — passing a relative path raises after
+    # the `-tmp` staging dir is written, leaving an orphaned half-checkpoint.
+    checkpoint_path = os.path.abspath(config.checkpoint_path or os.path.join(run_path, "checkpoint"))
     if os.path.exists(checkpoint_path):
         shutil.rmtree(checkpoint_path)
 
@@ -453,9 +455,16 @@ def train(config: TrainConfig):
 
     print("Saving checkpoint...")
     checkpoint = {"config": asdict(config), "params": unreplicate(train_info)["state"].params}
-    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-    save_args = orbax_utils.save_args_from_target(checkpoint)
-    orbax_checkpointer.save(checkpoint_path, checkpoint, save_args=save_args)
+    try:
+        orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+        save_args = orbax_utils.save_args_from_target(checkpoint)
+        orbax_checkpointer.save(checkpoint_path, checkpoint, save_args=save_args)
+    except Exception as e:
+        # don't let a checkpoint failure swallow the plot + summary that follow
+        print(f"WARNING: checkpoint save failed: {e!r}")
+        tmp_dir = checkpoint_path + ".orbax-checkpoint-tmp"
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
 
     print("Plotting...")
     _save_plot(loss_info, config.num_meta_updates, os.path.join(run_path, "metrics.png"))
